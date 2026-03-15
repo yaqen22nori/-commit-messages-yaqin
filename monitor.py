@@ -1,74 +1,38 @@
 import time
-import difflib
 import requests
+import re
 
 # ===== إعدادات التليجرام =====
 bot_token = "8655043920:AAHs1uenSdo5P0c-OSY_FNLxA4g9euSZ8J8"
-chat_id = "784582542"  # رقم محادثتك مع البوت
+chat_id = "784582542"
 
 # ===== إعدادات GitHub =====
-username = "r8oth"  # غيره باسم حسابك على GitHub
-repo = "commit-messages-yaqin"  # اسم المستودع على GitHub
+username = "r8oth"
+repo = "-commit-messages-yaqin"
 
-# ===== ملف محلي للمراقبة =====
-file_path = "/storage/emulated/0/Download/MyPythonProject/test.py"
+last_commit = None
 
-# ===== دالة إرسال رسالة على التليجرام =====
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     data = {"chat_id": chat_id, "text": message}
     try:
-        requests.post(url, data=data)
+        response = requests.post(url, data=data)
+        if response.status_code == 200:
+            print("✅ الرسالة أرسلت بنجاح للتليجرام")
+        else:
+            print("❌ فشل إرسال الرسالة:", response.text)
     except Exception as e:
         print("خطأ بإرسال رسالة التليجرام:", e)
 
-# ===== دالة قراءة الملف المحلي =====
-def read_file():
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            return f.readlines()
-    except FileNotFoundError:
-        print(f"⚠️ الملف {file_path} مو موجود!")
-        return []
-
-# ===== قراءة الملف لأول مرة =====
-old_lines = read_file()
-send_telegram("🔍 بدأت مراقبة الملف والمستودع على GitHub")
-print("بدأت مراقبة الملف والمستودع...")
-
-# ===== تذكر آخر commit من GitHub =====
-last_commit = None
+send_telegram("🔍 بدأت مراقبة المستودع على GitHub")
+print("بدأت مراقبة المستودع...")
 
 while True:
-    time.sleep(10)  # كل 10 ثواني لتقليل مشاكل Rate Limit
+    time.sleep(10)
 
-    # ===== مراقبة الملف المحلي =====
-    new_lines = read_file()
-    diff = difflib.ndiff(old_lines, new_lines)
-    line_number = 0
-    changes = []
-
-    for line in diff:
-        if line.startswith("  "):
-            line_number += 1
-        elif line.startswith("- "):
-            changes.append(f"❌ حذف في السطر {line_number + 1}: {line[2:].strip()}")
-            line_number += 1
-        elif line.startswith("+ "):
-            changes.append(f"➕ إضافة في السطر {line_number + 1}: {line[2:].strip()}")
-            line_number += 1
-
-    if changes:
-        send_telegram("\n".join(changes))
-        for msg in changes:
-            print(msg)
-
-    old_lines = new_lines
-
-    # ===== مراقبة GitHub =====
     try:
-        url = f"https://api.github.com/repos/{username}/{repo}/commits"
-        r = requests.get(url).json()
+        commits_url = f"https://api.github.com/repos/{username}/{repo}/commits"
+        r = requests.get(commits_url).json()
 
         if isinstance(r, list) and len(r) > 0:
             commit = r[0]["sha"]
@@ -77,9 +41,40 @@ while True:
             if last_commit is None:
                 last_commit = commit
             elif commit != last_commit:
-                msg = f"🚨 هناك تعديل جديد على GitHub:\n{message}"
-                send_telegram(msg)
-                print(msg)
+                diff_url = f"https://api.github.com/repos/{username}/{repo}/commits/{commit}"
+                commit_detail = requests.get(diff_url).json()
+                files_changed = commit_detail.get("files", [])
+
+                msg_lines = [f"🚨 هناك تعديل جديد على GitHub:\n{message}\n"]
+
+                hunk_pattern = re.compile(r'^@@ -(\d+),\d+ \+(\d+),\d+ @@')
+                
+                for f in files_changed:
+                    filename = f.get("filename")
+                    patch = f.get("patch")
+                    if patch:
+                        msg_lines.append(f"📄 {filename}:")
+                        lines = patch.splitlines()
+                        old_line_num = 0
+                        new_line_num = 0
+                        for line in lines:
+                            hunk = hunk_pattern.match(line)
+                            if hunk:
+                                old_line_num = int(hunk.group(1))
+                                new_line_num = int(hunk.group(2))
+                                continue
+                            if line.startswith("-"):
+                                msg_lines.append(f"❌ سطر {old_line_num}: {line[1:].strip()}")
+                                old_line_num += 1
+                            elif line.startswith("+"):
+                                msg_lines.append(f"➕ سطر {new_line_num}: {line[1:].strip()}")
+                                new_line_num += 1
+                            else:
+                                old_line_num += 1
+                                new_line_num += 1
+
+                send_telegram("\n".join(msg_lines))
+                print("\n".join(msg_lines))
                 last_commit = commit
         else:
             print("❌ لم أستطع الحصول على commits من GitHub")
