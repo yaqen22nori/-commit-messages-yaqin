@@ -65,7 +65,7 @@ while True:
 
     # ===== مراقبة GitHub =====
     try:
-        url = f"https://api.github.com/repos/{username}/{repo}/commits"
+        url = f"https://api.github.com/repos/"r8oth"/"-commit-messages-yaqin"/commits"
         r = requests.get(url).json()
         commit = r[0]["sha"]
 
